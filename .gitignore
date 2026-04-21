@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Type checking
+.mypy_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Outputs (don't commit scraped data)
+output/
+*.csv
+*.json
+*.xlsx
+*.db
+*.parquet
+!config/example_config.yaml
+
+# Logs
+logs/
+*.log
+
+# Secrets / env
+.env
+.env.*
+secrets.yaml

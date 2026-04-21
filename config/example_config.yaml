@@ -1,0 +1,69 @@
+# ScrapeKit Configuration Example
+# Copy this file and customize for your scraping job.
+
+scraper:
+  # Base URL of the target website
+  base_url: "https://books.toscrape.com"
+
+  # HTTP request settings
+  timeout: 30          # seconds
+  max_retries: 3
+  retry_delay: 2.0     # seconds between retries (exponential backoff applied)
+  delay_between_requests: 1.0   # polite crawl delay in seconds
+  delay_jitter: 0.5    # add ±jitter to avoid bot detection
+
+  # Concurrency (async mode only)
+  max_concurrent_requests: 5
+
+  # Optional: rotate through multiple proxies
+  proxies: []
+  # proxies:
+  #   - "http://user:pass@proxy1.example.com:8080"
+  #   - "http://user:pass@proxy2.example.com:8080"
+
+  # Optional: custom headers
+  headers:
+    User-Agent: "Mozilla/5.0 (compatible; ScrapeKit/1.0)"
+    Accept-Language: "en-US,en;q=0.9"
+
+  # Follow pagination automatically
+  pagination:
+    enabled: true
+    max_pages: 50
+    next_selector: "li.next a"   # CSS selector for "next page" link
+
+parser:
+  # CSS selectors for the data fields you want to extract
+  item_selector: "article.product_pod"
+  fields:
+    title:
+      selector: "h3 a"
+      attribute: "title"
+    price:
+      selector: "p.price_color"
+      attribute: null   # null = inner text
+    rating:
+      selector: "p.star-rating"
+      attribute: "class"
+    availability:
+      selector: "p.availability"
+      attribute: null
+    url:
+      selector: "h3 a"
+      attribute: "href"
+
+export:
+  formats:
+    - csv
+    - json
+    - excel
+    - sqlite
+  output_dir: "./output"
+  filename_prefix: "books_data"
+  # Deduplicate rows by this field before export (optional)
+  dedup_field: "title"
+
+logging:
+  level: "INFO"   # DEBUG | INFO | WARNING | ERROR
+  file: "logs/scrapekit.log"
+  rotation: "10 MB"

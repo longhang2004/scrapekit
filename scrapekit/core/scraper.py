@@ -1,0 +1,152 @@
+"""Synchronous scraper — handles pagination, rate-limiting, retries, and export."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import requests
+from loguru import logger
+
+from scrapekit.core.session import build_session, ProxyRotator
+from scrapekit.exporters import (
+    CSVExporter,
+    JSONExporter,
+    ExcelExporter,
+    SQLiteExporter,
+    ParquetExporter,
+)
+from scrapekit.models.config import AppConfig, ScraperConfig, ExportConfig
+from scrapekit.parsers import HTMLParser
+from scrapekit.utils import RateLimiter
+
+
+_EXPORTERS = {
+    "csv": CSVExporter,
+    "json": JSONExporter,
+    "excel": ExcelExporter,
+    "sqlite": SQLiteExporter,
+    "parquet": ParquetExporter,
+}
+
+
+class Scraper:
+    """High-level synchronous scraper."""
+
+    def __init__(self, config: AppConfig) -> None:
+        self._cfg = config
+        self._session = build_session(
+            headers=config.scraper.headers,
+            max_retries=config.scraper.max_retries,
+        )
+        self._rate_limiter = RateLimiter(
+            delay=config.scraper.delay_between_requests,
+            jitter=config.scraper.delay_jitter,
+        )
+        self._proxy_rotator = ProxyRotator(config.scraper.proxies)
+        self._parser = HTMLParser(config.parser)
+        self._records: list[dict[str, Any]] = []
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def run(self, start_url: str | None = None) -> list[dict[str, Any]]:
+        url: str | None = start_url or self._cfg.scraper.base_url
+        page = 1
+        max_pages = self._cfg.scraper.pagination.max_pages
+
+        while url and page <= max_pages:
+            logger.info(f"Scraping page {page}: {url}")
+            html = self._fetch(url)
+            if not html:
+                break
+
+            records = self._parser.parse(html, base_url=url)
+            logger.info(f"  → {len(records)} records found")
+            self._records.extend(records)
+
+            if not self._cfg.scraper.pagination.enabled:
+                break
+
+            next_url = HTMLParser.find_next_page(
+                html,
+                self._cfg.scraper.pagination.next_selector,
+                base_url=url,
+            )
+            url = next_url
+            page += 1
+
+        if self._cfg.export.dedup_field and self._records:
+            self._records = self._deduplicate(self._records, self._cfg.export.dedup_field)
+
+        logger.success(f"Scraping complete — {len(self._records)} total records.")
+        return self._records
+
+    def export(self, data: list[dict[str, Any]] | None = None) -> dict[str, Path]:
+        records = data or self._records
+        if not records:
+            raise RuntimeError("No data to export. Run scraper first.")
+
+        output_paths: dict[str, Path] = {}
+        prefix = self._cfg.export.filename_prefix
+
+        for fmt in self._cfg.export.formats:
+            exporter_cls = _EXPORTERS[fmt]
+            exporter = exporter_cls(output_dir=self._cfg.export.output_dir)
+            path = exporter.export(records, prefix)
+            output_paths[fmt] = path
+            logger.info(f"Exported {fmt.upper()}: {path}")
+
+        return output_paths
+
+    def scrape_and_export(self, start_url: str | None = None) -> dict[str, Path]:
+        self.run(start_url)
+        return self.export()
+
+    def fetch_json(self, url: str, params: dict[str, Any] | None = None) -> Any:
+        """Fetch a JSON REST endpoint and return the parsed response."""
+        self._rate_limiter.wait()
+        proxies = self._proxy_rotator.next_proxy()
+        resp = self._session.get(
+            url,
+            params=params,
+            timeout=self._cfg.scraper.timeout,
+            proxies=proxies,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    @property
+    def records(self) -> list[dict[str, Any]]:
+        return self._records
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _fetch(self, url: str) -> str | None:
+        self._rate_limiter.wait()
+        proxies = self._proxy_rotator.next_proxy()
+        try:
+            resp = self._session.get(
+                url,
+                timeout=self._cfg.scraper.timeout,
+                proxies=proxies,
+            )
+            resp.raise_for_status()
+            return resp.text
+        except requests.RequestException as exc:
+            logger.error(f"Failed to fetch {url}: {exc}")
+            return None
+
+    @staticmethod
+    def _deduplicate(records: list[dict[str, Any]], field: str) -> list[dict[str, Any]]:
+        seen: set[Any] = set()
+        unique: list[dict[str, Any]] = []
+        for rec in records:
+            key = rec.get(field)
+            if key not in seen:
+                seen.add(key)
+                unique.append(rec)
+        return unique
