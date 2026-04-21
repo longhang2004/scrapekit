@@ -33,10 +33,12 @@ class HTMLParser:
                 record[field_name] = None
                 continue
             if field_cfg.attribute:
-                value: str | None = el.get(field_cfg.attribute)  # type: ignore[assignment]
+                raw = el.get(field_cfg.attribute)
+                # BS4 returns list for multi-valued attrs (e.g. class); normalise to str
+                value: str | None = " ".join(raw) if isinstance(raw, list) else raw
                 # Resolve relative URLs
                 if field_cfg.attribute in ("href", "src") and value and base_url:
-                    if value.startswith("/"):
+                    if not value.startswith(("http://", "https://")):
                         from urllib.parse import urljoin
                         value = urljoin(base_url, value)
             else:
@@ -50,8 +52,9 @@ class HTMLParser:
         el = soup.select_one(selector)
         if el is None:
             return None
-        href: str | None = el.get("href")  # type: ignore[assignment]
-        if href and base_url and href.startswith("/"):
+        raw_href = el.get("href")
+        href: str | None = " ".join(raw_href) if isinstance(raw_href, list) else raw_href
+        if href and base_url and not href.startswith(("http://", "https://")):
             from urllib.parse import urljoin
             return urljoin(base_url, href)
         return href
