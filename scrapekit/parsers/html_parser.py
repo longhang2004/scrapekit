@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup, Tag
 
@@ -39,7 +40,6 @@ class HTMLParser:
                 # Resolve relative URLs
                 if field_cfg.attribute in ("href", "src") and value and base_url:
                     if not value.startswith(("http://", "https://")):
-                        from urllib.parse import urljoin
                         value = urljoin(base_url, value)
             else:
                 value = el.get_text(strip=True)
@@ -47,14 +47,23 @@ class HTMLParser:
         return record
 
     @staticmethod
-    def find_next_page(html: str, selector: str, base_url: str = "") -> str | None:
-        soup = BeautifulSoup(html, "lxml")
+    def find_next_page(
+        html: str | BeautifulSoup,
+        selector: str,
+        base_url: str = "",
+    ) -> str | None:
+        """Find the next-page URL from *html*.
+
+        Accepts either a raw HTML string **or** an already-parsed
+        ``BeautifulSoup`` object to avoid redundant parsing when the
+        caller already holds a soup instance.
+        """
+        soup = html if isinstance(html, BeautifulSoup) else BeautifulSoup(html, "lxml")
         el = soup.select_one(selector)
         if el is None:
             return None
         raw_href = el.get("href")
         href: str | None = " ".join(raw_href) if isinstance(raw_href, list) else raw_href
         if href and base_url and not href.startswith(("http://", "https://")):
-            from urllib.parse import urljoin
             return urljoin(base_url, href)
         return href
